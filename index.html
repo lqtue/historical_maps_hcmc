@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="vi"> <!-- Default language -->
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="initial-scale=1,user-scalable=no,maximum-scale=1,width=device-width">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="stylesheet" href="css/leaflet.css">
+    <link rel="stylesheet" href="css/L.Control.Layers.Tree.css">
+    <link rel="stylesheet" href="css/qgis2web.css">
+    <link rel="stylesheet" href="css/fontawesome-all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- PapaParse for robust CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <style>
+      /* Base styles */
+      html, body { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; overflow: hidden; }
+      #map { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: #f0f0f0; } /* Map always full screen */
+
+      /* --- Welcome Screen --- */
+      #welcome-screen {
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(50, 40, 30, 0.95); color: #E9E1D4;
+        z-index: 2000; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; text-align: center;
+        padding: 20px; transition: opacity 0.5s ease-out;
+      }
+      #welcome-screen h1 { font-size: 2.5em; margin-bottom: 10px; }
+      #welcome-screen p { font-size: 1.2em; margin-bottom: 30px; max-width: 600px; }
+      .mode-selection button {
+        background-color: #E9E1D4; color: #4A3A29; border: none;
+        padding: 15px 30px; margin: 10px; font-size: 1.1em; font-weight: bold;
+        cursor: pointer; border-radius: 5px; transition: background-color 0.3s, transform 0.2s;
+      }
+      .mode-selection button:hover { background-color: #BFB5A6; transform: scale(1.05); }
+
+      /* --- Common Button Styles (Used by Zoom, Opacity Toggle) --- */
+      .leaflet-control-custom, .leaflet-control-custom a {
+          background-color: rgba(74, 58, 41, 0.85); color: #E9E1D4; border: 1px solid #4A3A29;
+          border-radius: 5px; box-shadow: 0 1px 5px rgba(0,0,0,0.3); width: 30px; height: 30px;
+          line-height: 30px; font-size: 16px; font-weight: bold; text-align: center;
+          text-decoration: none; cursor: pointer;
+      }
+      .leaflet-control-custom:hover, .leaflet-control-custom a:hover {
+          background-color: rgba(90, 74, 57, 0.95); color: #FFFFFF;
+      }
+
+      /* --- Styling for Leaflet Zoom Control (MATCHING CUSTOM BUTTONS) --- */
+      .leaflet-control-zoom {
+          border: 1px solid #4A3A29; border-radius: 5px; box-shadow: 0 1px 5px rgba(0,0,0,0.3);
+          margin-top: 10px; margin-right: 10px;
+      }
+      .leaflet-control-zoom a {
+          background-color: rgba(74, 58, 41, 0.85); color: #E9E1D4; width: 30px; height: 30px;
+          line-height: 30px; font-size: 18px; font-weight: bold; text-align: center;
+          text-decoration: none; border: none; cursor: pointer;
+      }
+      .leaflet-control-zoom-in { border-radius: 5px 5px 0 0; border-bottom: 1px solid #5A4A39; }
+      .leaflet-control-zoom-out { border-radius: 0 0 5px 5px; }
+      .leaflet-control-zoom a:hover { background-color: rgba(90, 74, 57, 0.95); color: #FFFFFF; }
+      .leaflet-control-zoom a.leaflet-disabled { background-color: rgba(74, 58, 41, 0.5); color: #888; cursor: default; }
+
+
+      /* --- Opacity Control --- */
+      #opacity-control-container {
+        position: fixed; top: 80px; right: 10px; z-index: 1000;
+        display: flex; flex-direction: column; align-items: flex-end;
+      }
+      #opacity-toggle-btn { margin-bottom: 2px; /* Style applied via JS */ }
+      #opacity-slider-popup {
+          background: rgba(74, 58, 41, 0.9); padding: 10px 15px; border-radius: 5px;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: none; border: 1px solid #4A3A29;
+      }
+      #opacity-slider-popup.visible { display: block; }
+      #map-opacity-slider { width: 120px; height: 8px; cursor: pointer; vertical-align: middle; }
+      #opacity-slider-popup label { color: #E9E1D4; font-size: 12px; display: block; text-align: center; margin-bottom: 5px; }
+
+      /* --- Hamburger Menu --- */
+      .hamburger-menu {
+        position: fixed; top: 10px; left: 10px; z-index: 1300;
+        background: #4A3A29; color: white; padding: 8px 10px; border-radius: 5px;
+        cursor: pointer; font-size: 18px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        transition: background 0.3s ease;
+      }
+      .hamburger-menu:hover { background: #6E5A44; }
+
+      .sidebar {
+        position: fixed;
+        left: 0;
+        width: 300px;
+        background-color: rgba(90, 74, 57, 0.85);
+        color: #E9E1D4;
+        overflow: hidden;
+        z-index: 1100;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease-in-out;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 3px 0px 10px rgba(0, 0, 0, 0.3);
+        top: 0 !important;
+        bottom: auto !important;
+        height: auto !important;
+        max-height: 80vh !important;
+        border-radius: 0 0 8px 8px !important;
+      }
+      body.sidebar-open .sidebar { transform: translateX(0); }
+
+      /* --- Sidebar Specific Mode Heights (Desktop) --- */
+      @media screen and (min-width: 769px) { /* Apply only on larger screens */
+          body.discovery-mode.sidebar-open .sidebar {
+              top: 0; /* Position vertically */
+              bottom: 10vh;
+              height: 90vh; /* Explicit height for the container */
+              max-height: 90vh;
+              border-radius: 0 8px 8px 0;
+          }
+          /* Narrative Mode on Desktop when open */
+          body.narrative-mode.sidebar-open .sidebar {
+              top: 0; /* Back to top */
+              bottom: auto; /* Let content define bottom */
+              height: auto; /* Height based on header content ONLY */
+              max-height: 100vh; /* Allow header to grow if needed, but limit */
+              border-radius: 0 0 8px 0; /* Optional bottom-right radius */
+          }
+      }
+
+      .sidebar-header {
+          padding: 15px; background-color: #4a3a2994; display: flex; flex-direction: column;
+          align-items: stretch; flex-shrink: 0; /* Header should not shrink */
+          gap: 12px;
+      }
+      .sidebar-title { font-size: 16px; font-weight: bold; margin-bottom: 5px; text-align: center;}
+      .sidebar-controls-container { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+      .control-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+      .sidebar-controls-container label { font-size: 12px; color: #BFB5A6; white-space: nowrap; flex-shrink: 0; margin-right: auto; }
+      .sidebar-controls-container button {
+          background: #E9E1D4; color: #4A3A29; border: none; padding: 5px 10px; font-size: 11px;
+          cursor: pointer; border-radius: 5px; white-space: nowrap; flex-shrink: 0; display: inline-flex;
+          align-items: center; gap: 4px; min-width: 80px; justify-content: center; text-align: center;
+      }
+      .sidebar-controls-container button:hover { background: #BFB5A6; }
+      #toggle-language-btn { border-radius: 10px; padding: 5px 12px; }
+
+      .map-list {
+          padding: 0;
+          overflow-y: auto; /* Allow ONLY the list to scroll */
+          flex-grow: 1; /* Allows list to take up remaining vertical space */
+          display: block; /* Default display */
+          background-color: #5A4A39; /* Match sidebar background */
+      }
+      /* Hide Map List specifically in Narrative Mode */
+      body.narrative-mode .sidebar .map-list {
+          display: none; /* This rule correctly hides the list */
+      }
+
+      /* --- Map Item Styles --- */
+      .map-item { padding: 15px; border-bottom: 1px solid #4A3A29; display: flex; align-items: center; cursor: pointer; }
+      .map-item:hover { background-color: #6E5A44; }
+      .map-item.active { background-color: #836E56; font-weight: bold; }
+      .map-item-info { flex: 1; }
+      .map-title { font-weight: bold; margin-bottom: 5px; font-size: 14px; }
+      .map-details { font-size: 11px; color: #BFB5A6; }
+      .map-thumbnail img { width: 60px; height: 60px; margin-left: 10px; border: 1px solid #BFB5A6; object-fit: cover; background-color: #ccc; }
+
+      /* --- Info Box (Right aligned) --- */
+      #info-box {
+        position: fixed; bottom: 20px; right: 20px; width: 300px;
+        background-color: #5A4A39; color: #E9E1D4; border: 1px solid #4A3A29;
+        padding: 0; box-shadow: 0 2px 6px rgba(0,0,0,0.3); z-index: 1050; border-radius: 8px; display: none;
+        max-height: calc(100vh - 100px); font-size: 14px; line-height: 1.5;
+        display: flex; flex-direction: column;
+      }
+      #info-content {
+        padding: 15px; overflow-y: auto; flex-grow: 1;
+      }
+      #info-box h3 { margin-top: 0; font-size: 1.2em; color: #FFFFFF; }
+      #info-box .close-btn {
+        position: absolute; top: 5px; right: 10px; cursor: pointer;
+        font-size: 20px; color: #BFB5A6; z-index: 1061;
+      }
+      #info-box .close-btn:hover { color: #FFFFFF; }
+      #info-box p { margin-bottom: 1em; }
+      #info-box em { color: #BFB5A6; font-size: 0.9em; display: block; margin-bottom: 10px; }
+      #info-box a { color: #FFDAB9; text-decoration: underline; }
+      #info-box a:hover { color: #FFFFFF; }
+
+      /* --- Narrative Controls (INSIDE Info Box) --- */
+      #narrative-controls {
+        background: rgba(74, 58, 41, 0.9); padding: 8px 10px;
+        border-top: 1px solid #4A3A29; box-shadow: none; display: none;
+        align-items: center; justify-content: space-between; flex-shrink: 0;
+        margin-top: auto; /* Pushes to bottom */
+      }
+      body.narrative-mode #info-box #narrative-controls { display: flex; }
+
+      #narrative-controls button {
+        background: #E9E1D4; color: #4A3A29; border: none; padding: 5px 10px;
+        margin: 0 5px; cursor: pointer; border-radius: 4px; font-size: 12px;
+      }
+      #narrative-controls button:disabled { background: #888; color: #ccc; cursor: default; }
+      #narrative-controls button:hover:not(:disabled) { background: #BFB5A6; }
+      #narrative-progress { font-size: 12px; color: #E9E1D4; text-align: center; flex-grow: 1; margin: 0 5px; }
+
+      /* --- Responsive Adjustments --- */
+      @media screen and (max-width: 768px) {
+        /* Welcome, Hamburger styles remain */
+        #welcome-screen h1 { font-size: 1.8em; } #welcome-screen p { font-size: 1em; }
+        .mode-selection button { padding: 12px 25px; font-size: 1em; }
+        .hamburger-menu { left: 10px; top: 10px; }
+
+        /* Sidebar - Mobile (Overrides ALL desktop height/positioning) */
+        .sidebar {
+            width: 85%; max-width: 300px;
+            /* Explicitly override desktop styles for mobile */
+            height: auto !important; /* Let content define height */
+            max-height: 60vh !important; /* Max height for mobile */
+            top: 0 !important;
+            bottom: auto !important;
+            border-radius: 0 0 8px 8px !important; /* Rounded bottom corners */
+            overflow: hidden; /* Contain header and list */
+        }
+         /* Ensure map list scrolls on mobile if content overflows max-height */
+        .sidebar .map-list {
+            overflow-y: auto; /* Allow list scroll */
+            flex-grow: 1; /* Take remaining space */
+        }
+        /* Narrative mode hiding still applies via body class */
+
+        .sidebar-header { padding: 10px; }
+        .sidebar-controls-container { gap: 8px; }
+        .sidebar-controls-container button { font-size: 10px; padding: 4px 8px; min-width: 70px; }
+        #toggle-language-btn { padding: 4px 10px; }
+        .sidebar-controls-container label { font-size: 11px; }
+
+        /* Info Box - Mobile */
+        #info-box {
+            width: calc(100% - 20px); left: 10px; right: 10px; bottom: 10px;
+            max-height: 45vh; font-size: 13px;
+        }
+
+        /* Narrative Controls - Mobile (Inside info-box) */
+        #narrative-controls { padding: 6px 8px; }
+        #narrative-controls button { padding: 4px 8px; font-size: 11px; margin: 0 4px; }
+        #narrative-progress { font-size: 11px; margin: 0 4px; }
+
+        /* Opacity Control - Mobile */
+        #opacity-control-container { top: 80px; right: 10px; }
+        #map-opacity-slider { width: 100px; }
+
+        /* Zoom Control - Mobile */
+        .leaflet-control-zoom { margin-top: 10px; margin-right: 10px; }
+      }
+
+       @media screen and (max-width: 480px) {
+         /* Narrative controls size adjusted in 768px */
+         .sidebar-controls-container { gap: 6px; }
+         .sidebar-controls-container button { font-size: 9px; min-width: 60px; }
+         .sidebar-controls-container label { font-size: 10px; }
+         .control-row { gap: 4px; }
+
+         #info-box { font-size: 12px; max-height: 50vh; }
+         #map-opacity-slider { width: 80px; }
+         .sidebar { max-height: 65vh !important; } /* Allow slightly more height */
+       }
+    </style>
+    <title>Saigon - HCMC Historical Maps</title>
+  </head>
+
+  <body class=""> <!-- Mode classes added dynamically -->
+    <!-- Welcome Screen -->
+    <div id="welcome-screen">
+       <h1 data-i18n-key="welcomeTitle">Explore Saigon - HCMC History</h1>
+       <p data-i18n-key="welcomeDesc">Choose your journey: follow a guided narrative through time or freely discover historical maps.</p>
+       <div class="mode-selection">
+         <button id="narrative-mode-btn" data-i18n-key="narrativeMode">Narrative Mode</button>
+         <button id="discovery-mode-btn" data-i18n-key="discoveryMode">Discovery Mode</button>
+       </div>
+       <div style="margin-top: 25px; text-align: center;">
+         <label for="toggle-language-btn" style="color: #BFB5A6; font-size: 0.95em; display: block; margin-bottom: 6px;">Language / Ngôn ngữ</label>
+         <button id="toggle-language-btn" class="mode-selection" style="background-color: #E9E1D4; color: #4A3A29; border: none; padding: 12px 24px; font-size: 1.1em; font-weight: bold; border-radius: 5px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: background-color 0.3s, transform 0.2s;">
+           <span data-i18n-key="switchLangBtn">English</span>
+         </button>
+       </div>
+    </div>
+
+    <!-- Hamburger Menu-->
+    <div class="hamburger-menu" id="hamburger-menu">
+      <i class="fas fa-bars"></i>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header"> <!-- Header content always visible -->
+        <div class="sidebar-title" data-i18n-key="mapListTitle">Options</div>
+        <div class="sidebar-controls-container">
+             <div class="control-row">
+                 <label for="toggle-mode-btn" data-i18n-key="modeLabel">Mode:</label>
+                 <button id="toggle-mode-btn">
+                     <i class="fas fa-sync-alt"></i>
+                     <span id="current-mode-label">Discovery</span>
+                 </button>
+             </div>
+             <div class="control-row">
+                 <label for="sidebar-toggle-language-btn">Ngôn ngữ / Language:</label>
+                 <button id="sidebar-toggle-language-btn">
+                     <span data-i18n-key="switchLangBtn">English</span>
+                 </button>
+             </div>
+             <div class="control-row">
+                <label for="toggle-basemap-btn" data-i18n-key="basemapLabel">Basemap:</label>
+                <button id="toggle-basemap-btn">
+                    <i class="fas fa-layer-group"></i>
+                    <span id="current-basemap-label">Google Maps</span>
+                </button>
+             </div>
+        </div>
+      </div>
+      <!-- Map List (Hidden in Narrative Mode via CSS using body.narrative-mode) -->
+      <div class="map-list" id="map-list">
+          <!-- Map items generated dynamically -->
+      </div>
+    </div>
+
+    <!-- Fullscreen Map -->
+    <div id="map"></div>
+
+    <!-- Info Box (Contains Narrative Controls) -->
+    <div id="info-box">
+      <span class="close-btn" onclick="hideInfoBox()">×</span>
+      <div id="info-content">
+          <!-- Content loaded dynamically here -->
+      </div>
+      <!-- Narrative Controls Moved Inside -->
+      <div id="narrative-controls">
+           <button id="narrative-prev" data-i18n-key="prevBtn">< Prev</button>
+           <span id="narrative-progress"></span>
+           <button id="narrative-next" data-i18n-key="nextBtn">Next ></button>
+      </div>
+    </div>
+
+    <!-- Opacity Control -->
+    <div id="opacity-control-container">
+        <button id="opacity-toggle-btn"> <!-- Class added by JS -->
+            <i class="fas fa-sliders-h"></i>
+        </button>
+        <div id="opacity-slider-popup">
+            <input type="range" id="map-opacity-slider" min="0" max="100" value="100">
+        </div>
+    </div>
+
+    <!-- Leaflet and other JS includes -->
+    <script src="js/qgis2web_expressions.js"></script>
+    <script src="js/leaflet.js"></script>
+    <script src="js/L.Control.Layers.Tree.min.js"></script>
+    <script src="js/leaflet.rotatedMarker.js"></script>
+    <script src="js/leaflet.pattern.js"></script>
+    <script src="js/leaflet-hash.js"></script>
+    <script src="js/Autolinker.min.js"></script>
+    <script src="js/rbush.min.js"></script>
+    <script src="js/labelgun.min.js"></script>
+    <script src="js/labels.js"></script>
+
+    <script>
+      // --- Global Variables ---
+      let map; let hash; let autolinker = new Autolinker({ truncate: { length: 30, location: 'smart' } });
+      let baseLayers = {}; let currentBaseLayerId = 'google_map';
+      let historicalMapData = []; let narrativeData = []; let mapLayers = {};
+      let currentActiveLayer = null; let currentLang = 'vi'; let currentMode = null; // 'discovery' or 'narrative'
+      let currentNarrativeIndex = -1; let narrativeMarker = null;
+      let isSidebarOpen = false; let isScrollingNarrative = false;
+      const NARRATIVE_SCROLL_THROTTLE = 750;
+
+      // --- Translations ---
+      const translations = {
+        en: { welcomeTitle: "Explore Saigon - HCMC History", welcomeDesc: "Choose your journey...", narrativeMode: "Narrative", discoveryMode: "Discovery", mapListTitle: "Options", opacityLabel: "Opacity", infoBoxTitle: "Information", narrativeDefaultTitle: "Narrative Point", prevBtn: "< Prev", nextBtn: "Next >", modeLabel: "Mode:", switchModeBtn: "Switch Mode", languageLabel: "Language:", switchLangBtn: "Tiếng Việt", basemapLabel: "Basemap:", switchBaseBtn: "Switch Basemap", csvError: "Error loading data.", mapLoadError: "Could not load map data.", narrativeLoadError: "Could not load narrative data." },
+        vi: { welcomeTitle: "Khám phá Lịch sử Sài Gòn - TP.HCM", welcomeDesc: "Chọn hành trình của bạn...", narrativeMode: "Câu chuyện", discoveryMode: "Khám phá", mapListTitle: "Tuỳ chọn", opacityLabel: "Độ mờ", infoBoxTitle: "Thông tin", narrativeDefaultTitle: "Điểm dẫn chuyện", prevBtn: "< Trước", nextBtn: "Tiếp >", modeLabel: "Chế độ:", switchModeBtn: "Đổi Chế độ", languageLabel: "Ngôn ngữ:", switchLangBtn: "English", basemapLabel: "Nền:", switchBaseBtn: "Đổi Bản đồ nền", csvError: "Lỗi tải dữ liệu.", mapLoadError: "Không thể tải dữ liệu bản đồ.", narrativeLoadError: "Không thể tải dữ liệu câu chuyện." }
+      };
+
+      // --- DOM Elements ---
+      const welcomeScreen = document.getElementById('welcome-screen');
+      const narrativeModeBtn = document.getElementById('narrative-mode-btn');
+      const discoveryModeBtn = document.getElementById('discovery-mode-btn');
+      const sidebar = document.getElementById('sidebar');
+      const mapListDiv = document.getElementById('map-list');
+      const opacityToggleBtn = document.getElementById('opacity-toggle-btn');
+      const opacitySliderPopup = document.getElementById('opacity-slider-popup');
+      const opacitySlider = document.getElementById('map-opacity-slider');
+      const infoBox = document.getElementById('info-box');
+      const infoContent = document.getElementById('info-content');
+      const narrativeControls = document.getElementById('narrative-controls');
+      const narrativePrevBtn = document.getElementById('narrative-prev');
+      const narrativeNextBtn = document.getElementById('narrative-next');
+      const narrativeProgress = document.getElementById('narrative-progress');
+      const hamburgerMenu = document.getElementById('hamburger-menu');
+      const toggleModeBtn = document.getElementById('toggle-mode-btn');
+      const currentModeLabel = document.getElementById('current-mode-label');
+      const toggleLanguageBtn = document.getElementById('toggle-language-btn');
+      const sidebarToggleLanguageBtn = document.getElementById('sidebar-toggle-language-btn');
+      const toggleBasemapBtn = document.getElementById('toggle-basemap-btn');
+      const currentBasemapLabel = document.getElementById('current-basemap-label');
+      const bodyElement = document.body;
+
+      // --- Core Functions ---
+
+      /** Load CSV */
+      async function loadCSV(url) { /* ... (unchanged) ... */
+          try { const response = await fetch(url); if (!response.ok) { throw new Error(`HTTP error! status: ${response.status} for ${url}`); } const csvText = await response.text();
+              return new Promise((resolve, reject) => { Papa.parse(csvText, { header: true, skipEmptyLines: true, complete: (results) => { if (results.errors.length) { console.error("CSV Parsing Errors:", results.errors); reject(new Error(`CSV parsing error in ${url}`)); } else { resolve(results.data); } }, error: (error) => { console.error("PapaParse Error:", error); reject(error); } }); });
+          } catch (error) { console.error(`Error fetching or parsing CSV from ${url}:`, error); alert(`${translations[currentLang].csvError} (${url})`); throw error; }
+      }
+
+     /** Initialize Map */
+      function initializeMap() { /* ... (unchanged) ... */
+        map = L.map('map', { zoomControl: true, scrollWheelZoom: true, maxZoom: 28, minZoom: 1 }).fitBounds([[10.65, 106.47], [10.85, 106.89]]);
+        map.zoomControl.setPosition('topright'); hash = new L.Hash(map); map.attributionControl.setPrefix('<a href="https://github.com/tomchadwin/qgis2web" target="_blank">qgis2web</a> · <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a> · <a href="https://qgis.org">QGIS</a>');
+        const baseLayerOptions = { minZoom: 1, maxZoom: 28, reuseTiles: true, keepBuffer: 8 };
+        map.createPane('pane_google_map'); map.getPane('pane_google_map').style.zIndex = 100; baseLayers['google_map'] = L.tileLayer('https://mt.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', { ...baseLayerOptions, pane: 'pane_google_map', attribution: 'Map data © Google', maxNativeZoom: 22, label: 'Google Maps' });
+        map.createPane('pane_google_sat'); map.getPane('pane_google_sat').style.zIndex = 101; baseLayers['google_sat'] = L.tileLayer('https://mt.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { ...baseLayerOptions, pane: 'pane_google_sat', attribution: 'Imagery © Google', maxNativeZoom: 22, label: 'Google Satellite' });
+        map.createPane('pane_osm'); map.getPane('pane_osm').style.zIndex = 102; baseLayers['osm'] = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { ...baseLayerOptions, pane: 'pane_osm', attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', maxNativeZoom: 19, label: 'OpenStreetMap' });
+        map.createPane('pane_esri_sat'); map.getPane('pane_esri_sat').style.zIndex = 103; baseLayers['esri_sat'] = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { ...baseLayerOptions, pane: 'pane_esri_sat', attribution: 'Tiles © Esri — Source: Esri, i-cubed, USDA, USGS...', maxNativeZoom: 19, label: 'Esri Satellite' });
+        map.addLayer(baseLayers[currentBaseLayerId]);
+        updateBasemapButton();
+        const mapContainer = map.getContainer(); mapContainer.addEventListener('wheel', handleMapScroll);
+      }
+
+       /** Handle map scroll for narrative navigation */
+       function handleMapScroll(event) { /* ... (unchanged) ... */
+           if (currentMode !== 'narrative') return; if (isScrollingNarrative) return;
+           if (event.deltaY > 0) { if (currentNarrativeIndex < narrativeData.length - 1) { console.log("Scroll down -> next point."); isScrollingNarrative = true; showNarrativePoint(currentNarrativeIndex + 1, true); setTimeout(() => { isScrollingNarrative = false; }, NARRATIVE_SCROLL_THROTTLE); } }
+           else if (event.deltaY < 0) { if (currentNarrativeIndex > 0) { console.log("Scroll up -> prev point."); isScrollingNarrative = true; showNarrativePoint(currentNarrativeIndex - 1, true); setTimeout(() => { isScrollingNarrative = false; }, NARRATIVE_SCROLL_THROTTLE); } }
+       }
+
+      /** Switch Basemap and Update Button*/
+      function switchBasemap() { /* ... (unchanged) ... */
+          const oldBaseLayerId = currentBaseLayerId; const availableIds = Object.keys(baseLayers); const currentIndex = availableIds.indexOf(oldBaseLayerId);
+          const nextIndex = (currentIndex + 1) % availableIds.length; const newBaseLayerId = availableIds[nextIndex];
+          if (map.hasLayer(baseLayers[oldBaseLayerId])) { map.removeLayer(baseLayers[oldBaseLayerId]); }
+          map.addLayer(baseLayers[newBaseLayerId]); currentBaseLayerId = newBaseLayerId; console.log("Switched basemap to:", currentBaseLayerId); updateBasemapButton();
+      }
+
+      /** Update Basemap Button Text */
+      function updateBasemapButton() { /* ... (unchanged) ... */
+          if (currentBasemapLabel && baseLayers[currentBaseLayerId]) { currentBasemapLabel.textContent = baseLayers[currentBaseLayerId].options.label || currentBaseLayerId; }
+      }
+
+      /** Update Mode Button Text */
+      function updateModeButton() { /* ... (unchanged) ... */
+          if (currentModeLabel) {
+              const modeKey = currentMode === 'narrative' ? 'narrativeMode' : 'discoveryMode';
+              currentModeLabel.textContent = translations[currentLang][modeKey] || currentMode;
+          }
+      }
+
+      /** Creates Leaflet image overlay layers */
+      function createMapLayers() { /* ... (unchanged) ... */
+        historicalMapData.forEach(item => { const bounds = [ [parseFloat(item.bounds_sw_lat), parseFloat(item.bounds_sw_lng)], [parseFloat(item.bounds_ne_lat), parseFloat(item.bounds_ne_lng)] ]; if (bounds.some(coord => coord.some(isNaN))) { console.error(`Invalid bounds for map ${item.id}:`, item); return; } const paneId = `pane_${item.id}`; map.createPane(paneId); map.getPane(paneId).style.zIndex = 200 + (parseInt(item.year, 10) - 1700); const layer = L.imageOverlay(item.url, bounds, { pane: paneId, opacity: 1.0, interactive: false }); mapLayers[item.id] = { layer: layer, info: item, bounds: bounds }; }); console.log("Map layers created:", Object.keys(mapLayers).length);
+      }
+
+      /** Activate Historical Layer */
+      function activateLayer(layerId, fitBounds = true) { /* ... (unchanged) ... */
+        const selectedMap = mapLayers[layerId]; if (!selectedMap) { console.warn(`Layer with ID ${layerId} not found.`); return; }
+        if (currentActiveLayer && map.hasLayer(currentActiveLayer)) { map.removeLayer(currentActiveLayer); }
+        map.addLayer(selectedMap.layer); currentActiveLayer = selectedMap.layer;
+        if (opacitySlider) { updateOpacitySliderVisual(selectedMap.layer.options.opacity); }
+        if (currentMode === 'discovery') { document.querySelectorAll('.map-item').forEach(el => { el.classList.toggle('active', el.dataset.id === layerId); }); }
+        if (fitBounds && selectedMap.bounds) { map.flyToBounds(selectedMap.bounds, { padding: [20, 20], duration: 0.8 }); }
+      }
+
+      /** Update Opacity Slider Visual Value */
+       function updateOpacitySliderVisual(opacity) { /* ... (unchanged) ... */
+            if (opacitySlider) { const opacityPercent = Math.round(opacity * 100); opacitySlider.value = opacityPercent; }
+       }
+
+       /** Toggle Opacity Slider Popup */
+       function toggleOpacityPopup() { /* ... (unchanged) ... */
+           opacitySliderPopup.classList.toggle('visible');
+       }
+
+      /** Populate Sidebar Map List */
+      function populateSidebar() { /* ... (unchanged) ... */
+        mapListDiv.innerHTML = ''; const sortedMaps = [...historicalMapData].sort((a, b) => parseInt(a.year) - parseInt(b.year));
+        sortedMaps.forEach(item => { const mapItem = document.createElement('div'); mapItem.className = 'map-item'; mapItem.dataset.id = item.id; const thumbPath = `https://raw.githubusercontent.com/lqtue/historical_maps/main/thumbs/${item.thumb_url_base}_thumb.jpg`; mapItem.innerHTML = `<div class="map-item-info"><div class="map-title">${item[`name_${currentLang}`]} (${item.year})</div><div class="map-details">${item[`author_${currentLang}`]}</div></div><div class="map-thumbnail"><img src="${thumbPath}" alt="${item[`name_${currentLang}`]} Thumbnail" loading="lazy"></div>`; mapItem.addEventListener('click', () => { activateLayer(item.id, true); showInfo(item); if (window.innerWidth <= 768) { toggleSidebar(false); } }); mapListDiv.appendChild(mapItem); });
+      }
+
+      /** Show Info Box */
+      function showInfo(dataObject, isNarrative = false) { /* ... (unchanged, CSS handles controls visibility) ... */
+        if (!dataObject) { hideInfoBox(); return; }
+        const title = dataObject[`name_${currentLang}`] || (isNarrative ? translations[currentLang].narrativeDefaultTitle : '');
+        const year = dataObject.year ? ` (${dataObject.year})` : '';
+        const detailKey = isNarrative ? `info_${currentLang}` : `detail_${currentLang}`;
+        const fallbackKey = isNarrative ? `detail_${currentLang}` : `info_${currentLang}`;
+        const author = !isNarrative && dataObject[`author_${currentLang}`] ? `<em>${dataObject[`author_${currentLang}`]}</em>` : '';
+        const detailRaw = dataObject[detailKey] || dataObject[fallbackKey] || '';
+        const detailHtml = detailRaw.split('\n').map(par => `<p>${autolinker.link(par.trim())}</p>`).join('');
+
+        infoContent.innerHTML = `<h3>${title}${year}</h3> ${author} ${detailHtml}`;
+        infoBox.style.display = 'flex';
+        infoContent.scrollTop = 0;
+
+        // Controls display is handled by CSS rule: body.narrative-mode #info-box #narrative-controls
+      }
+
+      /** Hide Info Box */
+      function hideInfoBox() { /* ... (unchanged) ... */
+           infoBox.style.display = 'none';
+      }
+
+
+      /** Set Language */
+      function setLanguage(lang) { /* ... (unchanged) ... */
+        currentLang = lang; document.documentElement.lang = lang;
+        document.querySelectorAll('[data-i18n-key]').forEach(el => {
+          const key = el.dataset.i18nKey;
+          if (translations[lang] && translations[lang][key]) {
+              const translation = translations[lang][key];
+              if (el.tagName === 'LABEL' && !el.closest('#opacity-slider-popup')) { el.textContent = translation; }
+              else if (el.tagName === 'BUTTON' || el.parentElement.tagName === 'BUTTON') {
+                  const textElement = el.querySelector('span') || el;
+                  if ((el.id === 'narrative-mode-btn' || el.id === 'discovery-mode-btn' || el.id === 'narrative-prev' || el.id === 'narrative-next' || textElement.dataset.i18nKey === key || el.dataset.i18nKey === key) && key !== 'switchLangBtn' && !key.startsWith('current')) {
+                       const icon = el.querySelector('i');
+                       textElement.innerHTML = (icon && el.dataset.i18nKey !== key ? icon.outerHTML + ' ' : '') + translation;
+                  }
+              } else if (key !== 'switchLangBtn' && !key.startsWith('current') && el.id !== 'current-mode-label' && el.id !== 'current-basemap-label') {
+                 el.textContent = translation;
+              }
+          }
+        });
+        const nextLangKey = currentLang === 'vi' ? 'en' : 'vi';
+        const langBtnText = translations[nextLangKey].switchLangBtn;
+        const welcomeLangBtnSpan = toggleLanguageBtn.querySelector('span');
+        if(welcomeLangBtnSpan) welcomeLangBtnSpan.textContent = langBtnText;
+        const sidebarLangBtnSpan = sidebarToggleLanguageBtn.querySelector('span');
+        if(sidebarLangBtnSpan) sidebarLangBtnSpan.textContent = langBtnText;
+
+        document.title = `${translations[lang].welcomeTitle}`;
+        updateModeButton();
+        updateBasemapButton();
+        if (infoBox.style.display === 'flex') {
+            const activeMapItem = document.querySelector('.map-item.active');
+            const currentNarrativePoint = currentNarrativeIndex >= 0 ? narrativeData[currentNarrativeIndex] : null;
+            if (currentMode === 'narrative' && currentNarrativePoint) { showInfo(currentNarrativePoint, true); }
+            else if (currentMode === 'discovery' && activeMapItem && activeMapItem.dataset.id) {
+                const mapInfo = historicalMapData.find(m => m.id === activeMapItem.dataset.id);
+                if (mapInfo) showInfo(mapInfo);
+            }
+        }
+        if (currentMode === 'discovery') { populateSidebar(); }
+        localStorage.setItem('preferredLang', lang);
+      }
+
+
+      // --- Mode Specific Functions ---
+
+      /** Toggle Sidebar */
+      function toggleSidebar(forceOpen) { /* ... (unchanged) ... */
+          const shouldBeOpen = typeof forceOpen === 'boolean' ? forceOpen : !isSidebarOpen;
+          if (shouldBeOpen) { bodyElement.classList.add('sidebar-open'); hamburgerMenu.innerHTML = '<i class="fas fa-times"></i>'; isSidebarOpen = true; }
+          else { bodyElement.classList.remove('sidebar-open'); hamburgerMenu.innerHTML = '<i class="fas fa-bars"></i>'; isSidebarOpen = false; }
+          setTimeout(() => { map.invalidateSize({ animate: true }); }, 350);
+      }
+
+
+      /** Start Discovery Mode */
+      function startDiscoveryMode() { /* ... (unchanged) ... */
+        console.log("Starting Discovery Mode"); currentMode = 'discovery';
+        // Set body class FIRST
+        bodyElement.className = 'discovery-mode';
+        if (isSidebarOpen) bodyElement.classList.add('sidebar-open');
+
+        welcomeScreen.style.opacity = '0'; setTimeout(() => welcomeScreen.style.display = 'none', 500);
+        hideInfoBox();
+        populateSidebar();
+        updateNarrativeProgress();
+        if (narrativeMarker) { map.removeLayer(narrativeMarker); narrativeMarker = null; }
+        map.scrollWheelZoom.enable(); console.log("Scroll Wheel Zoom ENABLED");
+        updateModeButton();
+        setTimeout(() => { map.invalidateSize({ animate: true }); }, 50);
+      }
+
+      /** Start Narrative Mode */
+      function startNarrativeMode() { /* ... (unchanged) ... */
+        console.log("Starting Narrative Mode"); currentMode = 'narrative';
+        if (narrativeData.length === 0) { alert(translations[currentLang].narrativeLoadError); welcomeScreen.style.opacity = '1'; return; }
+        // Set body class FIRST
+        bodyElement.className = 'narrative-mode';
+        if (isSidebarOpen) bodyElement.classList.add('sidebar-open');
+
+        welcomeScreen.style.opacity = '0'; setTimeout(() => welcomeScreen.style.display = 'none', 500);
+        const activeItem = document.querySelector('.map-item.active'); if (activeItem) activeItem.classList.remove('active');
+        map.scrollWheelZoom.disable(); console.log("Scroll Wheel Zoom DISABLED");
+        updateModeButton();
+        currentNarrativeIndex = 0;
+        showNarrativePoint(currentNarrativeIndex, true);
+        setTimeout(() => { map.invalidateSize({ animate: true }); }, 50);
+      }
+
+
+      /** Show Narrative Point */
+      function showNarrativePoint(index, changeView = true) { /* ... (unchanged) ... */
+         if (index < 0 || index >= narrativeData.length) { console.warn("Invalid narrative index:", index); return; }
+         currentNarrativeIndex = index;
+         const point = narrativeData[index];
+         const lat = parseFloat(point.lat);
+         const lng = parseFloat(point.lng);
+         const hasCoords = !isNaN(lat) && !isNaN(lng);
+
+         activateLayer(point.map_id, !hasCoords && changeView);
+         showInfo(point, true);
+
+          if (hasCoords) {
+              const zoom = parseInt(point.zoom, 10) || 16;
+              if (changeView) { map.dragging.enable(); map.flyTo([lat, lng], zoom, { animate: true, duration: 1.0, easeLinearity: 0.3 }); }
+              if (narrativeMarker) { narrativeMarker.setLatLng([lat, lng]); }
+              else { narrativeMarker = L.marker([lat, lng]).addTo(map); }
+              if (!map.hasLayer(narrativeMarker)) { map.addLayer(narrativeMarker); }
+          } else {
+              if (narrativeMarker && map.hasLayer(narrativeMarker)) { map.removeLayer(narrativeMarker); }
+          }
+          updateNarrativeProgress();
+       }
+
+
+      /** Update Narrative Progress */
+      function updateNarrativeProgress() { /* ... (unchanged) ... */
+          if (currentMode === 'narrative' && narrativeData.length > 0) {
+              narrativeProgress.textContent = `${currentNarrativeIndex + 1} / ${narrativeData.length}`;
+              narrativePrevBtn.disabled = currentNarrativeIndex <= 0;
+              narrativeNextBtn.disabled = currentNarrativeIndex >= narrativeData.length - 1;
+          } else {
+              narrativeProgress.textContent = '';
+              narrativePrevBtn.disabled = true;
+              narrativeNextBtn.disabled = true;
+          }
+      }
+
+      // --- Event Listeners ---
+      // ... (All event listeners remain the same) ...
+      opacitySlider.addEventListener('input', function() { if (currentActiveLayer) { const newOpacity = parseInt(this.value, 10) / 100; currentActiveLayer.setOpacity(newOpacity); } });
+      opacityToggleBtn.addEventListener('click', toggleOpacityPopup);
+      document.addEventListener('click', function(event) { if (!opacitySliderPopup.contains(event.target) && !opacityToggleBtn.contains(event.target) && opacitySliderPopup.classList.contains('visible')) { toggleOpacityPopup(); } });
+      discoveryModeBtn.addEventListener('click', startDiscoveryMode);
+      narrativeModeBtn.addEventListener('click', startNarrativeMode);
+      toggleModeBtn.addEventListener('click', () => { hideInfoBox(); currentMode === 'discovery' ? startNarrativeMode() : startDiscoveryMode(); });
+      toggleLanguageBtn.addEventListener('click', () => { setLanguage(currentLang === 'vi' ? 'en' : 'vi'); });
+      sidebarToggleLanguageBtn.addEventListener('click', () => { setLanguage(currentLang === 'vi' ? 'en' : 'vi'); });
+      toggleBasemapBtn.addEventListener('click', switchBasemap);
+      narrativePrevBtn.addEventListener('click', () => { if (currentNarrativeIndex > 0) { showNarrativePoint(currentNarrativeIndex - 1, true); } });
+      narrativeNextBtn.addEventListener('click', () => { if (currentNarrativeIndex < narrativeData.length - 1) { showNarrativePoint(currentNarrativeIndex + 1, true); } });
+      hamburgerMenu.addEventListener('click', () => toggleSidebar());
+
+
+      // --- Initialization ---
+      async function initializeApp() { /* ... (unchanged) ... */
+          const preferredLang = localStorage.getItem('preferredLang');
+          if (preferredLang && translations[preferredLang]) { currentLang = preferredLang; }
+          document.documentElement.lang = currentLang;
+
+          try {
+              console.log("Loading map data..."); historicalMapData = await loadCSV('data/maps.csv'); console.log(`Loaded ${historicalMapData.length} map records.`);
+              console.log("Loading narrative data..."); narrativeData = await loadCSV('data/narrative.csv'); console.log(`Loaded ${narrativeData.length} narrative points.`);
+              if (historicalMapData.length === 0) { throw new Error(translations[currentLang]?.mapLoadError || "Could not load map data."); }
+              setLanguage(currentLang);
+          } catch (error) {
+              console.error("Initialization failed due to data loading error:", error);
+              welcomeScreen.style.opacity = '1';
+              const errorMsg = translations[currentLang]?.csvError || "Error loading data.";
+              const errorP = document.createElement('p');
+              errorP.style.color = 'red'; errorP.style.marginTop = '20px'; errorP.textContent = errorMsg;
+              welcomeScreen.appendChild(errorP);
+              return;
+          }
+
+          initializeMap();
+          if (opacityToggleBtn) { opacityToggleBtn.classList.add('leaflet-control-custom'); }
+          createMapLayers();
+          currentModeLabel.textContent = translations[currentLang].discoveryMode;
+          updateNarrativeProgress();
+
+          console.log("Application initialized. Waiting for mode selection.");
+      }
+
+      // Start the application initialization process
+      document.addEventListener('DOMContentLoaded', initializeApp);
+
+    </script>
+  </body>
+</html>

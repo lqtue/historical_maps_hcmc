@@ -1,0 +1,1095 @@
+<!doctype html>
+<html lang="vi"> <!-- Default language set by JS -->
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="initial-scale=1,user-scalable=no,maximum-scale=1,width=device-width">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Saigon - HCMC Historical Maps</title> <!-- Title updated by JS -->
+    <link rel="stylesheet" href="css/leaflet.css">
+    <link rel="stylesheet" href="css/qgis2web.css">
+    <link rel="stylesheet" href="css/fontawesome-all.min.css">
+    <!-- PapaParse for robust CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <!-- Leaflet and plugins -->
+    <script src="js/leaflet.js"></script>
+    <script src="js/leaflet.rotatedMarker.js"></script> <!-- Keep if markers need rotation -->
+    <script src="js/leaflet-hash.js"></script>
+    <script src="js/Autolinker.min.js"></script>
+    <!-- Scrollama for Scrollytelling -->
+    <script src="https://unpkg.com/scrollama"></script>
+
+    <style>
+        /* Base styles */
+        html, body { margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif; overflow: hidden; }
+        #map { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: #f0f0f0; transition: padding 0.3s ease-in-out; /* Transition for padding */ }
+
+        /* --- Welcome Screen --- */
+        #welcome-screen {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(50, 40, 30, 0.95); color: #E9E1D4;
+            z-index: 2000; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; text-align: center;
+            padding: 20px; transition: opacity 0.5s ease-out;
+        }
+        #welcome-screen h1 { font-size: 2.5em; margin-bottom: 10px; }
+        #welcome-screen p { font-size: 1.2em; margin-bottom: 30px; max-width: 600px; }
+        .mode-selection button {
+            background-color: #E9E1D4; color: #4A3A29; border: none;
+            padding: 15px 30px; margin: 10px; font-size: 1.1em; font-weight: bold;
+            cursor: pointer; border-radius: 5px; transition: background-color 0.3s, transform 0.2s;
+            display: inline-flex; align-items: center; gap: 8px; justify-content: center;
+        }
+        .mode-selection button:hover { background-color: #BFB5A6; transform: scale(1.05); }
+        #toggle-language-btn-welcome { /* Specific style for lang button on welcome screen */ }
+
+        /* --- Common Button Styles (Used by Zoom, Opacity Toggle, Hamburger) --- */
+        .leaflet-control-custom, .leaflet-control-custom a, .hamburger-menu {
+            background-color: rgba(74, 58, 41, 0.85); color: #E9E1D4; border: 1px solid #4A3A29;
+            border-radius: 5px; box-shadow: 0 1px 5px rgba(0,0,0,0.3); width: 30px; height: 30px;
+            line-height: 30px; font-size: 16px; font-weight: bold; text-align: center;
+            text-decoration: none; cursor: pointer; display: block;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .leaflet-control-custom:hover, .leaflet-control-custom a:hover, .hamburger-menu:hover {
+            background-color: rgba(90, 74, 57, 0.95); color: #FFFFFF;
+        }
+        .hamburger-menu { /* Specific overrides for hamburger */
+            position: fixed; top: 10px; left: 10px; z-index: 1300;
+            width: auto; height: auto; padding: 8px 10px; font-size: 18px; /* Adjust padding/size */
+            line-height: normal; /* Reset line-height */
+        }
+
+        /* --- Styling for Leaflet Zoom Control (MATCHING CUSTOM BUTTONS) --- */
+        .leaflet-control-zoom {
+            border: 1px solid #4A3A29; border-radius: 5px; box-shadow: 0 1px 5px rgba(0,0,0,0.3);
+            margin-top: 10px; margin-right: 10px;
+        }
+        .leaflet-control-zoom a { /* Inherits from .leaflet-control-custom a */
+             width: 30px; height: 30px; line-height: 30px; font-size: 18px;
+             border: none; /* Remove individual borders */
+             box-shadow: none; /* Remove individual shadows */
+        }
+        .leaflet-control-zoom-in { border-radius: 5px 5px 0 0; border-bottom: 1px solid #5A4A39; }
+        .leaflet-control-zoom-out { border-radius: 0 0 5px 5px; }
+        /* Hover/disabled states handled by common button styles */
+        .leaflet-control-zoom a.leaflet-disabled { background-color: rgba(74, 58, 41, 0.5); color: #888; cursor: default; }
+
+
+        /* --- Opacity Control --- */
+        #opacity-control-container {
+            position: fixed; top: 80px; right: 10px; z-index: 1000;
+            display: flex; flex-direction: column; align-items: flex-end;
+        }
+        #opacity-toggle-btn { margin-bottom: 2px; /* Style applied via common class */ }
+        #opacity-slider-popup {
+            background: rgba(74, 58, 41, 0.9); padding: 10px 15px; border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3); display: none; border: 1px solid #4A3A29;
+        }
+        #opacity-slider-popup.visible { display: block; }
+        #map-opacity-slider { width: 120px; height: 8px; cursor: pointer; vertical-align: middle; }
+        #opacity-slider-popup label { color: #E9E1D4; font-size: 12px; display: block; text-align: center; margin-bottom: 5px; }
+
+        /* --- Sidebar --- */
+        .sidebar {
+            position: fixed;
+            left: 0; top: 0; /* Always top */
+            width: 300px;
+            background-color: rgba(90, 74, 57, 0.85); /* Slightly darker for contrast */
+            color: #E9E1D4;
+            z-index: 1100;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease-in-out;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 3px 0px 10px rgba(0, 0, 0, 0.3);
+            border-radius: 0 0 8px 0; /* Default bottom right radius */
+            max-height: 90vh; /* General max height */
+            overflow: hidden; /* Prevent content spilling before calculation */
+        }
+        body.sidebar-open .sidebar { transform: translateX(0); }
+
+        /* --- Sidebar Header --- */
+        .sidebar-header {
+            padding: 15px; background-color: rgba(74, 58, 41, 0.8); /* Slightly transparent */
+            display: flex; flex-direction: column;
+            align-items: stretch; flex-shrink: 0; /* Header should not shrink */
+            gap: 12px;
+        }
+        .sidebar-title { font-size: 16px; font-weight: bold; margin-bottom: 5px; text-align: center;}
+        .sidebar-controls-container { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+        .control-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+        .sidebar-controls-container label { font-size: 12px; color: #BFB5A6; white-space: nowrap; flex-shrink: 0; margin-right: auto; }
+        .sidebar-controls-container button {
+            background: #E9E1D4; color: #4A3A29; border: none; padding: 5px 10px; font-size: 11px;
+            cursor: pointer; border-radius: 5px; white-space: nowrap; flex-shrink: 0; display: inline-flex;
+            align-items: center; gap: 4px; min-width: 80px; justify-content: center; text-align: center;
+            transition: background-color 0.3s;
+        }
+        .sidebar-controls-container button:hover { background: #BFB5A6; }
+
+        /* --- Sidebar Map List --- */
+        .map-list {
+            overflow-y: auto; /* Allow ONLY the list to scroll */
+            flex-grow: 1; /* Allows list to take up remaining vertical space */
+            background-color: #5A4A39; /* Match sidebar background more closely */
+        }
+        /* Hide Map List in Narrative Mode */
+        body.narrative-mode .sidebar .map-list {
+            display: none;
+        }
+        /* Adjust sidebar height in narrative mode (only header visible) */
+        body.narrative-mode .sidebar {
+            height: auto; /* Height determined by header content */
+            max-height: 50vh; /* Still prevent excessively tall header */
+        }
+         /* Discovery mode can use more height for the list */
+        body.discovery-mode .sidebar {
+             /* max-height: 90vh; is the default */
+             height: auto; /* Let flexbox determine height */
+        }
+
+
+        /* --- Map Item Styles --- */
+        .map-item { padding: 15px; border-bottom: 1px solid #4A3A29; display: flex; align-items: center; cursor: pointer; transition: background-color 0.2s; }
+        .map-item:hover { background-color: #6E5A44; }
+        .map-item.active { background-color: #836E56; font-weight: bold; }
+        .map-item-info { flex: 1; min-width: 0; /* Prevents text overflow issues */}
+        .map-title { font-weight: bold; margin-bottom: 5px; font-size: 14px; }
+        .map-details { font-size: 11px; color: #BFB5A6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .map-thumbnail img { width: 60px; height: 60px; margin-left: 10px; border: 1px solid #BFB5A6; object-fit: cover; background-color: #ccc; flex-shrink: 0; }
+
+        /* --- Info Box (Right aligned - Discovery Mode Only) --- */
+        #info-box {
+            position: fixed; bottom: 20px; right: 20px; width: 300px;
+            background-color: #5A4A39; color: #E9E1D4; border: 1px solid #4A3A29;
+            padding: 0; box-shadow: 0 2px 6px rgba(0,0,0,0.3); z-index: 1050; border-radius: 8px;
+            max-height: calc(100vh - 100px); font-size: 14px; line-height: 1.5;
+            display: none; /* Initially hidden, shown via JS */
+            flex-direction: column;
+            overflow: hidden; /* Contain children */
+        }
+        #info-content {
+            padding: 15px; overflow-y: auto; flex-grow: 1; /* Allow content scrolling */
+        }
+        #info-box h3 { margin-top: 0; font-size: 1.2em; color: #FFFFFF; }
+        #info-box .close-btn {
+            position: absolute; top: 5px; right: 10px; cursor: pointer;
+            font-size: 20px; color: #BFB5A6; z-index: 1; /* Above content */
+            padding: 2px 5px; background: rgba(90, 74, 57, 0.5); border-radius: 50%; line-height: 1;
+        }
+        #info-box .close-btn:hover { color: #FFFFFF; background: rgba(74, 58, 41, 0.8); }
+        #info-box p { margin-bottom: 1em; }
+        #info-box em { color: #BFB5A6; font-style: italic; font-size: 0.9em; display: block; margin-bottom: 10px; }
+        #info-box a { color: #FFDAB9; text-decoration: underline; }
+        #info-box a:hover { color: #FFFFFF; }
+
+        /* --- Narrative Controls (INSIDE Info Box - Not Used in Scrollama) --- */
+        #narrative-controls {
+            /* ... (styles remain but container is hidden in narrative mode) ... */
+            display: none; /* Hidden by default */
+        }
+        /* --- Hide Info Box and Controls in Narrative Mode --- */
+        body.narrative-mode #info-box {
+            display: none !important;
+        }
+
+        /* --- Narrative Story Container (Scrollama) --- */
+        #narrative-story {
+            position: fixed;
+            top: 10px; /* Default: top-left */
+            left: 10px;
+            width: 320px; /* Adjust width */
+            max-width: 35%; /* Prevent excessive width on large screens */
+            height: calc(100vh - 20px); /* Default: almost full height */
+            max-height: 90vh; /* Ensure some margin */
+            overflow-y: scroll;
+            background-color: rgba(50, 40, 30, 0.9); /* Darker, less transparent */
+            color: #E9E1D4;
+            z-index: 1200; /* Above map, potentially below sidebar header if overlapping */
+            padding: 0 15px 15px 15px; /* Add padding, but not at the very top */
+            box-shadow: 3px 0px 10px rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+            display: none; /* Hidden by default, shown in narrative mode */
+            scrollbar-width: thin; /* For Firefox */
+            scrollbar-color: #836E56 #4A3A29; /* For Firefox */
+            box-sizing: border-box;
+        }
+
+        /* Webkit scrollbar styling */
+        #narrative-story::-webkit-scrollbar { width: 8px; }
+        #narrative-story::-webkit-scrollbar-track { background: #4A3A29; border-radius: 4px; }
+        #narrative-story::-webkit-scrollbar-thumb { background-color: #836E56; border-radius: 4px; border: 2px solid #4A3A29; }
+
+        .step {
+            padding: 50px 10px 20px 10px; /* Add padding top to push content below header */
+            margin-bottom: 60vh; /* IMPORTANT: Creates space between steps for triggering */
+            /* border-bottom: 1px dashed #6E5A44; */ /* Optional visual separator */
+            opacity: 0.5; /* Make non-active steps less prominent */
+            transition: opacity 0.3s ease-in-out;
+            min-height: 100px; /* Ensure step has some height even if content is short */
+        }
+        .step:first-child {
+             padding-top: 20px; /* Less top padding for the very first step */
+        }
+        .step:last-child {
+            margin-bottom: 20vh; /* Less margin after the last step */
+            /* border-bottom: none; */
+        }
+        .step.active {
+            opacity: 1.0; /* Highlight the active step */
+        }
+        .step h3 { margin-top: 0; color: #FFFFFF; font-size: 1.1em; padding-bottom: 5px; border-bottom: 1px solid #6E5A44; margin-bottom: 15px;}
+        .step p { font-size: 0.95em; line-height: 1.6; margin-bottom: 1em; }
+
+        /* --- Adjustments for Narrative Mode --- */
+        body.narrative-mode #narrative-story {
+            display: block; /* Show story container */
+        }
+        /* Optional: Add padding to the map IF story overlaps map view */
+        body.narrative-mode #map.story-overlaps-left {
+            padding-left: 335px; /* Narrative width + margin */
+        }
+         body.narrative-mode #map.story-overlaps-bottom {
+            padding-bottom: 47vh; /* Narrative height + margin */
+        }
+
+
+        /* --- Responsive Adjustments --- */
+        @media screen and (max-width: 768px) {
+            #welcome-screen h1 { font-size: 1.8em; }
+            #welcome-screen p { font-size: 1em; }
+            .mode-selection button { padding: 12px 20px; font-size: 1em; }
+
+            /* Sidebar - Mobile */
+            .sidebar {
+                width: 85%; max-width: 300px;
+                max-height: 60vh !important;
+                border-radius: 0 0 8px 0 !important;
+            }
+            body.narrative-mode.sidebar-open .sidebar { height: auto !important; }
+            body.discovery-mode.sidebar-open .sidebar { height: auto !important; }
+
+            .sidebar-header { padding: 10px; }
+            .sidebar-controls-container { gap: 8px; }
+            .sidebar-controls-container button { font-size: 10px; padding: 4px 8px; min-width: 70px; }
+            .sidebar-controls-container label { font-size: 11px; }
+
+            /* Info Box (Discovery) - Mobile */
+            #info-box {
+                width: calc(100% - 20px); left: 10px; right: 10px; bottom: 10px;
+                max-height: 45vh; font-size: 13px;
+            }
+
+            /* Narrative Story - Mobile: Position at bottom */
+            #narrative-story {
+                width: calc(100% - 20px); /* Almost full width */
+                max-width: none;
+                max-height: 45vh; /* Limit height */
+                bottom: 10px; /* Position at bottom */
+                top: auto;
+                left: 10px;
+                right: 10px;
+                padding: 0 10px 10px 10px;
+            }
+            .step {
+                margin-bottom: 35vh; /* Less spacing needed */
+                padding: 30px 5px 15px 5px; /* Adjust padding */
+            }
+             .step:first-child { padding-top: 15px; }
+            .step:last-child { margin-bottom: 10vh; }
+
+            /* Remove map padding when story is at bottom */
+             body.narrative-mode #map.story-overlaps-left { padding-left: 0; }
+             body.narrative-mode #map.story-overlaps-bottom { padding-bottom: 47vh; } /* Adjust if needed */
+
+
+            /* Opacity Control - Mobile */
+            #opacity-control-container { top: 60px; /* Move up slightly */ }
+            #map-opacity-slider { width: 100px; }
+
+            /* Zoom Control - Mobile */
+            .leaflet-control-zoom { margin-top: 55px; /* Position below hamburger */ }
+        }
+
+        @media screen and (max-width: 480px) {
+            .sidebar-controls-container { gap: 6px; }
+            .sidebar-controls-container button { font-size: 9px; min-width: 60px; }
+            .sidebar-controls-container label { font-size: 10px; }
+            .control-row { gap: 4px; }
+
+            #info-box { font-size: 12px; max-height: 50vh; }
+            #map-opacity-slider { width: 80px; }
+            .sidebar { max-height: 65vh !important; }
+            .map-details { font-size: 10px; }
+            .map-title { font-size: 13px; }
+            .map-thumbnail img { width: 50px; height: 50px; }
+            .map-item { padding: 10px; }
+
+            #narrative-story { max-height: 50vh; }
+            .step { margin-bottom: 40vh; }
+            body.narrative-mode #map.story-overlaps-bottom { padding-bottom: 52vh; }
+        }
+    </style>
+</head>
+
+<body class=""> <!-- Mode classes added dynamically -->
+
+    <!-- Welcome Screen -->
+    <div id="welcome-screen">
+       <h1 data-i18n-key="welcomeTitle">Explore Saigon - HCMC History</h1>
+       <p data-i18n-key="welcomeDesc">Choose your journey: follow a guided narrative or freely discover historical maps.</p>
+       <div class="mode-selection">
+         <button id="narrative-mode-btn" data-i18n-key="narrativeMode">Narrative</button>
+         <button id="discovery-mode-btn" data-i18n-key="discoveryMode">Discovery</button>
+       </div>
+       <div style="margin-top: 25px; text-align: center;">
+         <label for="toggle-language-btn-welcome" style="color: #BFB5A6; font-size: 0.95em; display: block; margin-bottom: 6px;">Language / Ngôn ngữ</label>
+         <button id="toggle-language-btn-welcome" class="mode-selection">
+           <span data-i18n-key="switchLangBtn">English</span>
+         </button>
+       </div>
+    </div>
+
+    <!-- Hamburger Menu-->
+    <div class="hamburger-menu" id="hamburger-menu">
+      <i class="fas fa-bars"></i>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header"> <!-- Header content always visible -->
+        <div class="sidebar-title" data-i18n-key="mapListTitle">Options</div>
+        <div class="sidebar-controls-container">
+             <div class="control-row">
+                 <label for="toggle-mode-btn" data-i18n-key="modeLabel">Mode:</label>
+                 <button id="toggle-mode-btn">
+                     <i class="fas fa-sync-alt"></i>
+                     <span id="current-mode-label">Discovery</span>
+                 </button>
+             </div>
+             <div class="control-row">
+                 <label for="sidebar-toggle-language-btn" data-i18n-key="languageLabel">Language:</label>
+                 <button id="sidebar-toggle-language-btn">
+                     <span data-i18n-key="switchLangBtn">English</span>
+                 </button>
+             </div>
+             <div class="control-row">
+                <label for="toggle-basemap-btn" data-i18n-key="basemapLabel">Basemap:</label>
+                <button id="toggle-basemap-btn">
+                    <i class="fas fa-layer-group"></i>
+                    <span id="current-basemap-label">Google Maps</span>
+                </button>
+             </div>
+        </div>
+      </div>
+      <!-- Map List (Hidden in Narrative Mode via CSS) -->
+      <div class="map-list" id="map-list">
+          <!-- Map items generated dynamically -->
+      </div>
+    </div>
+
+    <!-- Fullscreen Map -->
+    <div id="map"></div>
+
+    <!-- Narrative Story Container (for Scrollama) -->
+    <div id="narrative-story">
+        <!-- Narrative steps added dynamically by JS -->
+    </div>
+
+    <!-- Info Box (Used in Discovery Mode) -->
+    <div id="info-box">
+      <span class="close-btn" onclick="hideInfoBox()" title="Close">×</span>
+      <div id="info-content">
+          <!-- Content loaded dynamically -->
+      </div>
+      <!-- Narrative Controls (Hidden/Unused with Scrollama) -->
+      <div id="narrative-controls" style="display: none;">
+           <button id="narrative-prev" data-i18n-key="prevBtn">< Prev</button>
+           <span id="narrative-progress"></span>
+           <button id="narrative-next" data-i18n-key="nextBtn">Next ></button>
+      </div>
+    </div>
+
+    <!-- Opacity Control -->
+    <div id="opacity-control-container">
+        <button id="opacity-toggle-btn" class="leaflet-control-custom" title="Adjust Map Opacity"> <!-- Added class directly -->
+            <i class="fas fa-sliders-h"></i>
+        </button>
+        <div id="opacity-slider-popup">
+             <label data-i18n-key="opacityLabel">Opacity</label>
+            <input type="range" id="map-opacity-slider" min="0" max="100" value="100">
+        </div>
+    </div>
+
+    <script>
+      // --- Global Variables ---
+      let map;
+      let hash;
+      const autolinker = new Autolinker({ truncate: { length: 30, location: 'smart' } });
+      const baseLayers = {};
+      let currentBaseLayerId = 'google_map';
+      let historicalMapData = [];
+      let narrativeData = [];
+      const mapLayers = {}; // Stores Leaflet layer objects { id: { layer: L.TileLayer, info: {}, bounds: L.LatLngBounds } }
+      let currentActiveMapId = null; // Store the ID of the active historical map
+      let currentLang = 'vi'; // Default language
+      let currentMode = null; // 'discovery' or 'narrative'
+      let currentNarrativeIndex = -1; // Index of the currently active narrative step
+      let narrativeMarker = null;
+      let isSidebarOpen = false;
+      // let isScrollingNarrative = false; // No longer needed for simple wheel listener
+      // const NARRATIVE_SCROLL_THROTTLE = 750; // No longer needed
+
+      let scroller = null; // Scrollama instance
+
+      // --- Translations ---
+      const translations = {
+        en: { welcomeTitle: "Explore Saigon - HCMC History", welcomeDesc: "Choose your journey: follow a guided narrative or freely discover historical maps.", narrativeMode: "Narrative", discoveryMode: "Discovery", mapListTitle: "Options", opacityLabel: "Map Opacity", infoBoxTitle: "Information", narrativeDefaultTitle: "Narrative Point", prevBtn: "< Prev", nextBtn: "Next >", modeLabel: "Mode:", switchModeBtn: "Switch Mode", languageLabel: "Language:", switchLangBtn: "Tiếng Việt", basemapLabel: "Basemap:", switchBaseBtn: "Switch Basemap", basemapGoogleMaps: "Google Maps", basemapGoogleSat: "Google Satellite", basemapOSM: "OpenStreetMap", basemapEsriSat: "Esri Satellite", csvError: "Error loading required data.", mapDataError: "Could not load map data (maps.csv). Check format.", narrativeDataError: "Could not load narrative data (narrative.csv).", tileLayerError: "Error creating tile layer for map:" },
+        vi: { welcomeTitle: "Khám phá Lịch sử Sài Gòn - TP.HCM", welcomeDesc: "Chọn hành trình của bạn: theo dõi câu chuyện dẫn dắt hoặc tự do khám phá bản đồ lịch sử.", narrativeMode: "Câu chuyện", discoveryMode: "Khám phá", mapListTitle: "Tuỳ chọn", opacityLabel: "Độ mờ Bản đồ", infoBoxTitle: "Thông tin", narrativeDefaultTitle: "Điểm dẫn chuyện", prevBtn: "< Trước", nextBtn: "Tiếp >", modeLabel: "Chế độ:", switchModeBtn: "Đổi Chế độ", languageLabel: "Ngôn ngữ:", switchLangBtn: "English", basemapLabel: "Nền:", switchBaseBtn: "Đổi Bản đồ nền", basemapGoogleMaps: "Google Maps", basemapGoogleSat: "Ảnh vệ tinh Google", basemapOSM: "OpenStreetMap", basemapEsriSat: "Ảnh vệ tinh Esri", csvError: "Lỗi tải dữ liệu cần thiết.", mapDataError: "Không thể tải dữ liệu bản đồ (maps.csv). Kiểm tra định dạng.", narrativeDataError: "Không thể tải dữ liệu câu chuyện (narrative.csv).", tileLayerError: "Lỗi tạo lớp tile cho bản đồ:" }
+      };
+
+      // --- DOM Elements ---
+      const welcomeScreen = document.getElementById('welcome-screen');
+      const narrativeModeBtn = document.getElementById('narrative-mode-btn');
+      const discoveryModeBtn = document.getElementById('discovery-mode-btn');
+      const sidebar = document.getElementById('sidebar');
+      const mapListDiv = document.getElementById('map-list');
+      const opacityToggleBtn = document.getElementById('opacity-toggle-btn');
+      const opacitySliderPopup = document.getElementById('opacity-slider-popup');
+      const opacitySlider = document.getElementById('map-opacity-slider');
+      const infoBox = document.getElementById('info-box');
+      const infoContent = document.getElementById('info-content');
+      const narrativeControls = document.getElementById('narrative-controls'); // Still exists but hidden in narrative
+      // const narrativePrevBtn = document.getElementById('narrative-prev'); // Not used by Scrollama
+      // const narrativeNextBtn = document.getElementById('narrative-next'); // Not used by Scrollama
+      // const narrativeProgress = document.getElementById('narrative-progress'); // Not used by Scrollama
+      const hamburgerMenu = document.getElementById('hamburger-menu');
+      const toggleModeBtn = document.getElementById('toggle-mode-btn');
+      const currentModeLabel = document.getElementById('current-mode-label');
+      const toggleLanguageBtnWelcome = document.getElementById('toggle-language-btn-welcome');
+      const sidebarToggleLanguageBtn = document.getElementById('sidebar-toggle-language-btn');
+      const toggleBasemapBtn = document.getElementById('toggle-basemap-btn');
+      const currentBasemapLabel = document.getElementById('current-basemap-label');
+      const bodyElement = document.body;
+      const mapElement = document.getElementById('map'); // Get map element for padding adjustments
+      const narrativeStoryContainer = document.getElementById('narrative-story');
+
+      // --- Core Functions ---
+
+      /** Load and parse CSV file using PapaParse */
+      async function loadCSV(url) {
+          try {
+              const response = await fetch(url);
+              if (!response.ok) { throw new Error(`HTTP error! status: ${response.status} for ${url}`); }
+              const csvText = await response.text();
+              return new Promise((resolve, reject) => {
+                  Papa.parse(csvText, {
+                      header: true,
+                      skipEmptyLines: true,
+                      complete: (results) => {
+                          if (results.errors.length) {
+                              console.error("CSV Parsing Errors:", results.errors);
+                              reject(new Error(`CSV parsing error in ${url}`));
+                          } else {
+                              resolve(results.data);
+                          }
+                      },
+                      error: (error) => {
+                          console.error("PapaParse Error:", error);
+                          reject(error);
+                      }
+                  });
+              });
+          } catch (error) {
+              console.error(`Error fetching or parsing CSV from ${url}:`, error);
+              alert(`${translations[currentLang]?.csvError || 'CSV Error'} (${url.split('/').pop()})`);
+              throw error; // Re-throw to stop initialization if critical
+          }
+      }
+
+     /** Initialize Leaflet Map */
+      function initializeMap() {
+          map = L.map('map', {
+              zoomControl: true,
+              scrollWheelZoom: true, // Keep enabled, Scrollama doesn't interfere
+              maxZoom: 22,
+              minZoom: 10,
+              attributionControl: false
+          }).fitBounds([[10.65, 106.47], [10.85, 106.89]]);
+
+          map.zoomControl.setPosition('topright');
+          hash = new L.Hash(map);
+          L.control.attribution({
+              prefix: '<a href="https://github.com/lqtue/historical_maps" target="_blank">Project</a> · <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a>'
+          }).addTo(map);
+
+          const baseLayerOptions = { minZoom: map.getMinZoom(), maxZoom: map.getMaxZoom(), reuseTiles: true, keepBuffer: 8 };
+          const paneOptions = { zIndex: 100 };
+
+          map.createPane('pane_google_map', paneOptions);
+          baseLayers['google_map'] = L.tileLayer('https://mt.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+              ...baseLayerOptions, pane: 'pane_google_map', attribution: 'Map data © Google', maxNativeZoom: 21, i18n_key: 'basemapGoogleMaps'
+          });
+          paneOptions.zIndex++; map.createPane('pane_google_sat', paneOptions);
+          baseLayers['google_sat'] = L.tileLayer('https://mt.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+              ...baseLayerOptions, pane: 'pane_google_sat', attribution: 'Imagery © Google', maxNativeZoom: 21, i18n_key: 'basemapGoogleSat'
+          });
+          paneOptions.zIndex++; map.createPane('pane_osm', paneOptions);
+          baseLayers['osm'] = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+              ...baseLayerOptions, pane: 'pane_osm', attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', maxNativeZoom: 19, i18n_key: 'basemapOSM'
+          });
+          paneOptions.zIndex++; map.createPane('pane_esri_sat', paneOptions);
+          baseLayers['esri_sat'] = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+              ...baseLayerOptions, pane: 'pane_esri_sat', attribution: 'Tiles © Esri', maxNativeZoom: 19, i18n_key: 'basemapEsriSat'
+          });
+
+          map.addLayer(baseLayers[currentBaseLayerId]);
+          updateBasemapButton();
+
+          // No map scroll listener needed here for Scrollama
+      }
+
+      /** Switch Basemap and Update Button */
+      function switchBasemap() {
+          const availableIds = Object.keys(baseLayers);
+          const currentIndex = availableIds.indexOf(currentBaseLayerId);
+          const nextIndex = (currentIndex + 1) % availableIds.length;
+          const newBaseLayerId = availableIds[nextIndex];
+          if (map.hasLayer(baseLayers[currentBaseLayerId])) { map.removeLayer(baseLayers[currentBaseLayerId]); }
+          map.addLayer(baseLayers[newBaseLayerId]); currentBaseLayerId = newBaseLayerId;
+          updateBasemapButton();
+      }
+
+      /** Update Basemap Button Text using translation key */
+      function updateBasemapButton() {
+          if (currentBasemapLabel && baseLayers[currentBaseLayerId]) {
+              const labelKey = baseLayers[currentBaseLayerId].options.i18n_key || currentBaseLayerId;
+              currentBasemapLabel.textContent = translations[currentLang]?.[labelKey] || labelKey;
+          }
+      }
+
+      /** Update Mode Button Text */
+      function updateModeButton() {
+          if (currentModeLabel) {
+              const modeKey = currentMode === 'narrative' ? 'narrativeMode' : 'discoveryMode';
+              currentModeLabel.textContent = translations[currentLang]?.[modeKey] || currentMode;
+          }
+      }
+
+      /** Creates Leaflet TILE layers based on data from maps.csv */
+      function createMapLayers() {
+          let zIndexCounter = 400;
+          historicalMapData.forEach(item => {
+              const bounds = L.latLngBounds(
+                  [parseFloat(item.bounds_sw_lat), parseFloat(item.bounds_sw_lng)],
+                  [parseFloat(item.bounds_ne_lat), parseFloat(item.bounds_ne_lng)]
+              );
+              if (!bounds.isValid()) { console.error(`Invalid bounds for map ${item.id}:`, item); return; }
+              if (!item.tile_url_template || item.min_native_zoom === undefined || item.max_native_zoom === undefined) {
+                   console.error(`${translations[currentLang]?.tileLayerError || 'Tile Layer Error'} ${item.id}. Missing required tile info (tile_url_template, min_native_zoom, max_native_zoom) in maps.csv.`);
+                   return;
+              }
+              const minNativeZoom = parseInt(item.min_native_zoom, 10); const maxNativeZoom = parseInt(item.max_native_zoom, 10);
+              if (isNaN(minNativeZoom) || isNaN(maxNativeZoom)) { console.error(`Invalid native zoom levels for map ${item.id}`); return; }
+
+              const paneId = `pane_hist_${item.id}`;
+              map.createPane(paneId).style.zIndex = zIndexCounter++;
+              const layer = L.tileLayer(item.tile_url_template, {
+                  pane: paneId, opacity: 1.0, interactive: false, bounds: bounds,
+                  minNativeZoom: minNativeZoom, maxNativeZoom: maxNativeZoom,
+                  minZoom: map.getMinZoom(), maxZoom: map.getMaxZoom(),
+                  attribution: item[`attribution_${currentLang}`] || '',
+                  tms: item.tms === 'true' || item.tms === '1',
+                  noWrap: true
+              });
+              mapLayers[item.id] = { layer: layer, info: item, bounds: bounds };
+          });
+          console.log(`Map layers created: ${Object.keys(mapLayers).length}`);
+      }
+
+
+      /** Activate Historical Tile Layer */
+      function activateLayer(layerId, fitBounds = true) {
+          const selectedMap = mapLayers[layerId];
+          if (!selectedMap) { console.warn(`Layer with ID ${layerId} not found.`); return; }
+
+          // Deactivate previous layer if different
+          if (currentActiveMapId && currentActiveMapId !== layerId && mapLayers[currentActiveMapId] && map.hasLayer(mapLayers[currentActiveMapId].layer) ) {
+              map.removeLayer(mapLayers[currentActiveMapId].layer);
+          }
+
+          // Activate new layer if not already active
+          if (currentActiveMapId !== layerId || !map.hasLayer(selectedMap.layer)) {
+               if (!map.hasLayer(selectedMap.layer)) {
+                    const currentOpacity = parseFloat(opacitySlider.value) / 100;
+                    selectedMap.layer.setOpacity(currentOpacity);
+                    map.addLayer(selectedMap.layer);
+               }
+              currentActiveMapId = layerId;
+
+              // Update sidebar selection in discovery mode
+              if (currentMode === 'discovery') {
+                  document.querySelectorAll('.map-item').forEach(el => {
+                      el.classList.toggle('active', el.dataset.id === layerId);
+                  });
+              }
+          }
+
+          // Fit bounds if requested
+          if (fitBounds && selectedMap.bounds) {
+              map.flyToBounds(selectedMap.bounds, { padding: [30, 30], duration: 0.8, maxZoom: selectedMap.layer.options.maxNativeZoom || map.getMaxZoom() });
+          }
+      }
+
+       /** Update Opacity Slider Visual Value */
+       function updateOpacitySliderVisual(opacity) {
+            if (opacitySlider) {
+                 const opacityPercent = Math.round(opacity * 100);
+                 opacitySlider.value = opacityPercent;
+            }
+       }
+
+       /** Toggle Opacity Slider Popup */
+       function toggleOpacityPopup() {
+           opacitySliderPopup.classList.toggle('visible');
+           if (opacitySliderPopup.classList.contains('visible') && currentActiveMapId && mapLayers[currentActiveMapId]) {
+                const currentLayerOpacity = mapLayers[currentActiveMapId].layer.options.opacity;
+                updateOpacitySliderVisual(currentLayerOpacity);
+           }
+       }
+
+      /** Populate Sidebar Map List */
+      function populateSidebar() {
+        mapListDiv.innerHTML = '';
+        const sortedMaps = [...historicalMapData].sort((a, b) => parseInt(a.year || 0) - parseInt(b.year || 0));
+        sortedMaps.forEach(item => {
+            if (!mapLayers[item.id]) return; // Skip if layer creation failed
+            const mapItem = document.createElement('div');
+            mapItem.className = 'map-item'; mapItem.dataset.id = item.id;
+            const thumbPath = item.thumb_url_base ? `https://raw.githubusercontent.com/lqtue/historical_maps/main/thumbs/${item.thumb_url_base}_thumb.jpg` : ''; // Handle missing thumb
+            mapItem.innerHTML = `
+                <div class="map-item-info">
+                    <div class="map-title">${item[`name_${currentLang}`] || item.id} (${item.year || 'N/A'})</div>
+                    <div class="map-details">${item[`author_${currentLang}`] || ''}</div>
+                </div>
+                <div class="map-thumbnail">
+                    ${thumbPath ? `<img src="${thumbPath}" alt="${item[`name_${currentLang}`] || item.id} Thumbnail" loading="lazy" onerror="this.style.display='none'; this.parentElement.style.backgroundColor='#ddd';">` : '<div style="width:60px; height:60px; background:#ddd;"></div>'}
+                </div>`;
+            mapItem.addEventListener('click', () => {
+                activateLayer(item.id, true);
+                showInfo(item); // Show info box in Discovery mode
+                if (window.innerWidth <= 768) { toggleSidebar(false); }
+            });
+            mapListDiv.appendChild(mapItem);
+        });
+         if (currentActiveMapId && currentMode === 'discovery') {
+            const activeItem = mapListDiv.querySelector(`.map-item[data-id="${currentActiveMapId}"]`);
+            if (activeItem) activeItem.classList.add('active');
+         }
+      }
+
+
+      /** Show Info Box (Discovery Mode Only) */
+      function showInfo(dataObject) {
+        // This function is now primarily for Discovery mode
+        if (currentMode !== 'discovery' || !dataObject) {
+             hideInfoBox();
+             return;
+        }
+
+        const title = dataObject[`name_${currentLang}`] || dataObject.id;
+        const year = dataObject.year ? ` (${dataObject.year})` : '';
+        const detailKey = `detail_${currentLang}`;
+        const fallbackKey = `info_${currentLang}`; // Allow fallback
+        const author = dataObject[`author_${currentLang}`] ? `<em>${dataObject[`author_${currentLang}`]}</em>` : '';
+        const detailRaw = dataObject[detailKey] || dataObject[fallbackKey] || '';
+        const detailHtml = detailRaw.split('\n').map(par => par.trim()).filter(par => par.length > 0).map(par => `<p>${autolinker.link(par)}</p>`).join('');
+
+        infoContent.innerHTML = `<h3>${title}${year}</h3> ${author} ${detailHtml}`;
+        infoBox.style.display = 'flex';
+        infoContent.scrollTop = 0;
+      }
+
+      /** Hide Info Box */
+      function hideInfoBox() {
+           if (infoBox) infoBox.style.display = 'none';
+      }
+
+      /** Set Language */
+      function setLanguage(lang) {
+          if (!translations[lang]) return;
+          currentLang = lang;
+          document.documentElement.lang = lang;
+
+          document.querySelectorAll('[data-i18n-key]').forEach(el => {
+              const key = el.dataset.i18nKey;
+              if (translations[lang]?.[key]) {
+                   if (el.tagName === 'BUTTON' && el.querySelector('span[data-i18n-key]')) {
+                       const span = el.querySelector(`span[data-i18n-key="${key}"]`);
+                       if (span) span.textContent = translations[lang][key];
+                   } else if (el.tagName === 'SPAN' && el.closest('button')) {
+                       el.textContent = translations[lang][key];
+                   } else {
+                       el.textContent = translations[lang][key];
+                   }
+              }
+          });
+
+          const nextLangKey = currentLang === 'vi' ? 'en' : 'vi';
+          const langBtnText = translations[nextLangKey]?.switchLangBtn || 'Switch Lang';
+          if (toggleLanguageBtnWelcome) toggleLanguageBtnWelcome.querySelector('span').textContent = langBtnText;
+          if (sidebarToggleLanguageBtn) sidebarToggleLanguageBtn.querySelector('span').textContent = langBtnText;
+
+          document.title = translations[lang].welcomeTitle || "Historical Maps";
+          updateModeButton();
+          updateBasemapButton();
+
+           // Refresh Discovery info box content if visible
+           if (currentMode === 'discovery' && infoBox.style.display === 'flex' && currentActiveMapId && mapLayers[currentActiveMapId]) {
+               showInfo(mapLayers[currentActiveMapId].info);
+           }
+           // Refresh narrative steps if in narrative mode
+           else if (currentMode === 'narrative') {
+               // Re-populate and re-initialize scrollama
+               startNarrativeMode(false); // Pass flag to prevent fade animation etc.
+           }
+
+          if (currentMode === 'discovery' && historicalMapData.length > 0) {
+              populateSidebar(); // Update map names/authors in sidebar
+          }
+
+          // Refresh attribution for the current historical layer
+          if (currentActiveMapId && mapLayers[currentActiveMapId]) {
+              const newAttribution = mapLayers[currentActiveMapId].info[`attribution_${currentLang}`] || '';
+              mapLayers[currentActiveMapId].layer.options.attribution = newAttribution;
+              if (map.attributionControl) { /* Basic refresh of prefix */
+                  map.attributionControl.remove();
+                  L.control.attribution({ prefix: '<a href="https://github.com/lqtue/historical_maps" target="_blank">Project</a> · <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a>' }).addTo(map);
+              }
+          }
+
+          localStorage.setItem('preferredLang', lang);
+      }
+
+      // --- Mode Specific Functions ---
+
+      /** Toggle Sidebar */
+      function toggleSidebar(forceOpen) {
+          const shouldBeOpen = typeof forceOpen === 'boolean' ? forceOpen : !bodyElement.classList.contains('sidebar-open');
+          if (shouldBeOpen) {
+              bodyElement.classList.add('sidebar-open');
+              hamburgerMenu.innerHTML = '<i class="fas fa-times"></i>';
+              isSidebarOpen = true;
+          } else {
+              bodyElement.classList.remove('sidebar-open');
+              hamburgerMenu.innerHTML = '<i class="fas fa-bars"></i>';
+              isSidebarOpen = false;
+          }
+          setTimeout(() => { if (map) map.invalidateSize({ animate: true }); }, 350);
+      }
+
+      /** Adjust Map Padding based on Narrative Story Position */
+      function adjustMapPaddingForStory() {
+          if (!map) return;
+          mapElement.classList.remove('story-overlaps-left', 'story-overlaps-bottom'); // Reset classes
+
+          if (currentMode === 'narrative') {
+              const storyRect = narrativeStoryContainer.getBoundingClientRect();
+              const mapRect = mapElement.getBoundingClientRect();
+              const isMobile = window.innerWidth <= 768; // Match CSS breakpoint
+
+              if (isMobile) {
+                  // Mobile: Story is at the bottom
+                  mapElement.classList.add('story-overlaps-bottom');
+                  // map.setPadding({ bottom: storyRect.height + 15 }); // Add padding + margin
+              } else {
+                  // Desktop: Story is on the left
+                  mapElement.classList.add('story-overlaps-left');
+                  // map.setPadding({ left: storyRect.width + 15 }); // Add padding + margin
+              }
+              map.invalidateSize({ animate: true }); // Apply padding change
+          } else {
+             // Reset padding in discovery mode
+             // map.setPadding({ left: 0, bottom: 0 });
+             map.invalidateSize({ animate: true });
+          }
+      }
+
+      /** Start Discovery Mode */
+      function startDiscoveryMode(isInitialCall = true) {
+          // --- Cleanup Scrollama ---
+          if (scroller) { // Check if switching FROM narrative
+             // console.log("Cleaning up Scrollama");
+             window.removeEventListener('resize', handleResize);
+             scroller.destroy(); // Destroy Scrollama instance
+             scroller = null;
+             narrativeStoryContainer.style.display = 'none'; // Hide story container
+             narrativeStoryContainer.innerHTML = ''; // Clear steps
+             // Reset map padding
+             adjustMapPaddingForStory(); // Will reset padding as mode is not narrative
+          }
+          // --- End Cleanup ---
+
+          currentMode = 'discovery'; // Set mode AFTER cleanup checks
+          bodyElement.className = 'discovery-mode';
+          if (isSidebarOpen) bodyElement.classList.add('sidebar-open');
+
+          if (isInitialCall && welcomeScreen.style.display !== 'none') {
+              welcomeScreen.style.opacity = '0';
+              setTimeout(() => { welcomeScreen.style.display = 'none'; }, 500);
+          }
+
+          hideInfoBox(); // Hide info box initially
+          populateSidebar(); // Populate or refresh sidebar list
+
+          if (narrativeMarker) { map.removeLayer(narrativeMarker); narrativeMarker = null; }
+          map.scrollWheelZoom.enable();
+          updateModeButton();
+
+          if (map) map.invalidateSize(); // Ensure map size is correct
+      }
+
+      /** Start Narrative Mode */
+      function startNarrativeMode(isInitialCall = true) {
+          if (narrativeData.length === 0) {
+              alert(translations[currentLang]?.narrativeDataError || "Cannot start narrative: No data loaded.");
+              return;
+          }
+          // console.log("Starting Narrative Mode with Scrollama");
+          currentMode = 'narrative';
+          bodyElement.className = 'narrative-mode';
+          if (isSidebarOpen) bodyElement.classList.add('sidebar-open');
+
+          if (isInitialCall && welcomeScreen.style.display !== 'none') {
+              welcomeScreen.style.opacity = '0';
+              setTimeout(() => { welcomeScreen.style.display = 'none'; }, 500);
+          }
+
+          // --- Scrollama Setup ---
+          // 1. Enable map scroll/zoom (Scrollama doesn't prevent it)
+          map.scrollWheelZoom.enable();
+
+          // 2. Populate the story container
+          narrativeStoryContainer.innerHTML = ''; // Clear previous steps
+          narrativeData.forEach((point, index) => {
+              const stepEl = document.createElement('div');
+              stepEl.classList.add('step');
+              stepEl.dataset.index = index;
+
+              const title = point[`name_${currentLang}`] || (translations[currentLang]?.narrativeDefaultTitle || 'Narrative Point');
+              const year = point.year ? ` (${point.year})` : '';
+              const detailKey = `info_${currentLang}`;
+              const fallbackKey = `detail_${currentLang}`;
+              const detailRaw = point[detailKey] || point[fallbackKey] || '';
+              const detailHtml = detailRaw.split('\n').map(par => par.trim()).filter(par => par.length > 0).map(par => `<p>${autolinker.link(par)}</p>`).join('');
+
+              stepEl.innerHTML = `<h3>${title}${year}</h3>${detailHtml}`;
+              narrativeStoryContainer.appendChild(stepEl);
+          });
+
+           // 3. Destroy existing scroller if re-initializing (e.g., language change)
+           if (scroller) {
+                scroller.destroy();
+                window.removeEventListener('resize', handleResize); // Remove old listener
+           }
+
+          // 4. Initialize Scrollama
+          scroller = scrollama();
+          scroller
+              .setup({
+                  step: '#narrative-story .step',
+                  offset: 0.55, // Trigger slightly past middle
+                  debug: false,
+              })
+              .onStepEnter(handleStepEnter);
+
+          // 5. Setup resize handler
+          window.addEventListener('resize', handleResize);
+          // --- End Scrollama Setup ---
+
+          // Deactivate any selected map item in sidebar visually
+          document.querySelectorAll('.map-item.active').forEach(el => el.classList.remove('active'));
+          updateModeButton();
+
+          // 6. Trigger initial state
+          // Set index, show point on map, highlight first step visually
+          currentNarrativeIndex = 0;
+          showNarrativePoint(0, true); // Show first point on map
+          const firstStep = narrativeStoryContainer.querySelector('.step[data-index="0"]');
+          if (firstStep) firstStep.classList.add('active');
+          narrativeStoryContainer.scrollTop = 0; // Ensure story starts at the top
+
+
+          hideInfoBox(); // Ensure old info box is hidden
+
+          if (map) {
+               adjustMapPaddingForStory(); // Adjust map padding based on story position
+               map.invalidateSize(); // Ensure map size is correct after padding adjustments
+          }
+
+          // Hide elements specific to the old narrative controls (belt-and-suspenders)
+          if(narrativeControls) narrativeControls.style.display = 'none';
+      }
+
+
+      /** Show Narrative Point (Called by Scrollama) */
+      function showNarrativePoint(index, changeView = true) {
+         if (index < 0 || index >= narrativeData.length) { console.warn("Invalid narrative index:", index); return; }
+
+         // Only update if the index has actually changed (prevent redundant calls from Scrollama)
+         if (index === currentNarrativeIndex && !changeView) { // Allow forcing view change on initial load
+             return;
+         }
+
+         currentNarrativeIndex = index;
+         const point = narrativeData[index];
+
+         if (!point.map_id || !point.lat || !point.lng) {
+             console.error(`Narrative point ${index} is missing required data (map_id, lat, lng):`, point);
+             if (narrativeMarker && map.hasLayer(narrativeMarker)) map.removeLayer(narrativeMarker); // Hide marker if data missing
+             // Still activate the layer if map_id exists
+             if (point.map_id) activateLayer(point.map_id, changeView);
+             return;
+         }
+
+         const lat = parseFloat(point.lat);
+         const lng = parseFloat(point.lng);
+         const hasValidCoords = !isNaN(lat) && !isNaN(lng);
+
+         // Activate the associated historical map layer
+         // Don't fit layer bounds if we have specific coords to fly to
+         activateLayer(point.map_id, !hasValidCoords && changeView);
+
+         // **Info is displayed in the .step element via Scrollama, no need to call showInfo()**
+
+          // Handle map view and marker
+          if (hasValidCoords) {
+              const zoom = parseInt(point.zoom, 10) || 17;
+              if (changeView) {
+                  if (!map.dragging.enabled()) map.dragging.enable(); // Ensure dragging is enabled
+                  map.flyTo([lat, lng], zoom, { animate: true, duration: 1.0, easeLinearity: 0.3 });
+              }
+              if (!narrativeMarker) { narrativeMarker = L.marker([lat, lng]).addTo(map); }
+              else { narrativeMarker.setLatLng([lat, lng]); if (!map.hasLayer(narrativeMarker)) { map.addLayer(narrativeMarker); } }
+          } else {
+              if (narrativeMarker && map.hasLayer(narrativeMarker)) { map.removeLayer(narrativeMarker); }
+          }
+       }
+
+      /** Scrollama: Handle when a step enters the viewport */
+      function handleStepEnter(response) {
+          // response.element: the step element DOM node
+          // response.index: the index of the step
+          // response.direction: 'up' or 'down'
+          // console.log(`Scrollama Step Enter: Index ${response.index}, Direction: ${response.direction}`);
+
+          const stepIndex = parseInt(response.element.dataset.index, 10);
+
+          // Highlight active step visually
+          narrativeStoryContainer.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
+          response.element.classList.add('active');
+
+          // Trigger map update for the entered step
+          // Pass changeView=true to make the map fly
+          showNarrativePoint(stepIndex, true);
+      }
+
+      /** Scrollama: Handle window resize */
+      function handleResize() {
+          if (scroller) { scroller.resize(); } // Re-calculate trigger points
+          adjustMapPaddingForStory(); // Re-calculate map padding
+      }
+
+
+      // --- Event Listeners ---
+      function setupEventListeners() {
+          opacitySlider.addEventListener('input', function() {
+              if (currentActiveMapId && mapLayers[currentActiveMapId]) {
+                  const newOpacity = parseInt(this.value, 10) / 100;
+                  mapLayers[currentActiveMapId].layer.setOpacity(newOpacity);
+              }
+          });
+          opacityToggleBtn.addEventListener('click', toggleOpacityPopup);
+          document.addEventListener('click', function(event) {
+              if (!opacitySliderPopup.contains(event.target) && !opacityToggleBtn.contains(event.target) && opacitySliderPopup.classList.contains('visible')) {
+                  toggleOpacityPopup();
+              }
+          });
+
+          // Mode selection
+          discoveryModeBtn.addEventListener('click', () => startDiscoveryMode(true));
+          narrativeModeBtn.addEventListener('click', () => startNarrativeMode(true));
+          toggleModeBtn.addEventListener('click', () => {
+              const targetMode = currentMode === 'discovery' ? 'narrative' : 'discovery';
+              if (targetMode === 'narrative') { startNarrativeMode(true); }
+              else { startDiscoveryMode(true); }
+              if (window.innerWidth <= 768) toggleSidebar(false);
+          });
+
+          // Language toggles
+          const handleLanguageToggle = () => setLanguage(currentLang === 'vi' ? 'en' : 'vi');
+          toggleLanguageBtnWelcome.addEventListener('click', handleLanguageToggle);
+          sidebarToggleLanguageBtn.addEventListener('click', handleLanguageToggle);
+
+          // Basemap toggle
+          toggleBasemapBtn.addEventListener('click', switchBasemap);
+
+          // Sidebar toggle
+          hamburgerMenu.addEventListener('click', () => toggleSidebar());
+      }
+
+      // --- Initialization ---
+      async function initializeApp() {
+          const preferredLang = localStorage.getItem('preferredLang');
+          if (preferredLang && translations[preferredLang]) { currentLang = preferredLang; }
+          else if (navigator.language.startsWith('vi')) { currentLang = 'vi'; }
+          else { currentLang = 'en'; }
+          setLanguage(currentLang); // Apply initial language early
+
+          try {
+              console.log("Loading map data...");
+              historicalMapData = await loadCSV('data/maps.csv');
+              console.log(`Loaded ${historicalMapData.length} map records.`);
+              if (historicalMapData.length === 0) throw new Error(translations[currentLang]?.mapDataError || "Map data is empty.");
+
+              console.log("Loading narrative data...");
+              narrativeData = await loadCSV('data/narrative.csv');
+              console.log(`Loaded ${narrativeData.length} narrative points.`);
+              // Allow narrative mode only if data loaded successfully
+              if (narrativeData.length === 0) {
+                   console.warn("Narrative data is empty or failed to load. Narrative mode will be disabled.");
+                   if(narrativeModeBtn) narrativeModeBtn.disabled = true;
+                   const toggleNarrativeBtn = toggleModeBtn.querySelector('i.fa-sync-alt');
+                   if (toggleNarrativeBtn && toggleNarrativeBtn.parentElement === toggleModeBtn) {
+                       // Attempt to disable sidebar toggle if only discovery is available (optional)
+                       // toggleModeBtn.disabled = true; // Or hide it
+                   }
+              }
+
+          } catch (error) {
+              console.error("Initialization failed due to data loading error:", error);
+              welcomeScreen.style.opacity = '1'; welcomeScreen.style.display = 'flex';
+              const errorMsg = error.message || translations[currentLang]?.csvError || "Error loading data.";
+              const errorP = document.createElement('p');
+              errorP.style.color = 'red'; errorP.style.marginTop = '20px';
+              errorP.textContent = `Initialization Failed: ${errorMsg}`;
+              welcomeScreen.appendChild(errorP);
+              narrativeModeBtn.disabled = true; discoveryModeBtn.disabled = true; // Disable both on critical error
+              return;
+          }
+
+          initializeMap();
+          createMapLayers();
+          setupEventListeners();
+
+          console.log("Application initialized. Waiting for mode selection.");
+      }
+
+      // Start the application initialization process when the DOM is ready
+      document.addEventListener('DOMContentLoaded', initializeApp);
+
+    </script>
+</body>
+</html>
